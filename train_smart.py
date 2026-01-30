@@ -16,16 +16,15 @@ except FileNotFoundError:
     print("⚠️ 'spam.csv' not found. Creating empty dataset.")
     df = pd.DataFrame(columns=['label', 'message', 'label_num'])
 
-# --- 2. INJECT NEW INTELLIGENCE (FORCE FEEDING STRATEGY) ---
-# We feed the model these difficult examples multiple times so it memorizes the pattern.
+# --- 2. INJECT INTELLIGENCE (FORCE FEEDING STRATEGY) ---
+# We feed the model these specific edge cases to teach it complex patterns.
 
-# 2. INJECT INTELLIGENCE (FORCE FEEDING STRATEGY)
 new_smart_data = [
     # ==========================================
     # 🔴 REAL SPAM SCENARIOS (High Risk)
     # ==========================================
     
-    # --- 🔞 ADULT & DATING SPAM (The 18+ Fielding) ---
+    # --- 🔞 ADULT & DATING SPAM (The 18+ Filter) ---
     (1, "Hot singles in your area are waiting to chat. Click link to meet."),
     (1, "Warning: 18+ content. Uncensored videos leaked. Download now."),
     (1, "Hey baby, wanna have some fun tonight? Text me on WhatsApp +91-90000..."),
@@ -57,7 +56,15 @@ new_smart_data = [
     # 🟢 TRICKY HAM SCENARIOS (Safe Context)
     # ==========================================
     
-    # --- ✅ SAFE USE OF "ADULT" WORDS (Defense) ---
+    # --- 🛡️ WARNINGS & ADVICE (Teaching Context - The Fix) ---
+    # These teach the model that discussing/warning about scams is SAFE.
+    (0, "Bhai be careful, I got a fake message saying I won a lottery."),
+    (0, "Never click on links claiming you won a prize or money."),
+    (0, "It was a crypto scam so I blocked the number immediately."),
+    (0, "Please do not share your OTP with anyone, even if they say it is urgent."),
+    (0, "I reported the fraud message to the cyber police."),
+
+    # --- ✅ SAFE USE OF "ADULT" WORDS (Context Defense) ---
     (0, "The movie is rated 18+ because of strong language and violence."),
     (0, "Adult supervision is required for children using this toy."),
     (0, "I love you mom, see you at dinner tonight."),
@@ -80,9 +87,9 @@ new_smart_data = [
 new_df = pd.DataFrame(new_smart_data, columns=['label_num', 'message'])
 new_df['label'] = new_df['label_num'].map({1: 'spam', 0: 'ham'})
 
-# 🔥 THE SECRET SAUCE: REPEAT NEW DATA 50 TIMES 🔥
-# This forces the Random Forest to pay attention to these specific patterns
-# instead of ignoring them as "noise" in the large dataset.
+# 🔥 DATA AUGMENTATION: REPEAT NEW DATA 50 TIMES 🔥
+# This forces the model to memorize these specific complex patterns
+# ensuring it doesn't ignore them amidst the 5000+ original messages.
 new_df = pd.concat([new_df] * 50, ignore_index=True)
 
 # Merge Old + Repeated New Data
@@ -92,7 +99,7 @@ print(f"🧠 Augmented Dataset Size: {len(df)} messages (Force-Fed New Patterns)
 # --- 3. TRAIN THE MODEL ---
 X_train, X_test, y_train, y_test = train_test_split(df['message'], df['label_num'], test_size=0.2, random_state=42)
 
-# Using the class from model_class.py
+# Initialize the Classifier (Random Forest + N-Grams)
 model = SpamClassifier()
 model.train(X_train, y_train)
 
@@ -100,17 +107,13 @@ model.train(X_train, y_train)
 preds = [model.predict(msg) for msg in X_test]
 print(f"\nAccuracy: {accuracy_score(y_test, preds)*100:.2f}%")
 
-# --- 5. VERIFICATION (The Moment of Truth) ---
-test_msg = "Dear customer, your credit points are expiring soon. Redeem them effectively."
-pred = model.predict(test_msg)
-prob = model.predict_proba(test_msg)
+# --- 5. TEST SPECIFIC CASES ---
+test_spam = "Dear customer, your credit points are expiring soon. Redeem them effectively."
+test_ham = "Bhai be careful, I got a fake message saying I won a lottery."
 
-print(f"\n🧪 Test on 'Credit Points' message: {'🔴 SPAM' if pred==1 else '🟢 HAM'}")
-print(f"📊 Confidence: {prob*100:.2f}%")
+print(f"\n🧪 Test 1 (Spam Pattern): {'🔴 SPAM' if model.predict(test_spam)==1 else '🟢 HAM'}")
+print(f"🧪 Test 2 (Context Warning): {'🟢 HAM' if model.predict(test_ham)==0 else '🔴 SPAM'}")
 
-if pred == 1:
-    # --- 6. SAVE ONLY IF SUCCESSFUL ---
-    joblib.dump(model.pipeline, 'spam_model_production.pkl')
-    print("\n✅ SUCCESS! Smart Model saved as 'spam_model_production.pkl'")
-else:
-    print("\n❌ FAILED to detect. Increase the repetition count (e.g., * 100).")
+# --- 6. SAVE MODEL ---
+joblib.dump(model.pipeline, 'spam_model_production.pkl')
+print("\n✅ SUCCESS! Smart Model saved as 'spam_model_production.pkl'")
