@@ -3,114 +3,69 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import uvicorn
-import re
-from model_class import TextCleaner  # Ensure model_class.py is in the same folder
+from model_class import TextCleaner # Crucial: Must be imported to load pickle
 
-# --- 1. CONFIGURATION & APP SETUP ---
+# 1. Initialize FastAPI
 app = FastAPI(
-    title="ShieldAI Defense System",
-    description="Enterprise-grade Hybrid Spam Detection API. Combines Heuristic Rules with NLP Model.",
-    version="3.0 (Production Stable)"
+    title="ShieldAI (Pure ML Core)",
+    description="Production Ready AI Spam Detection - No Hardcoded Rules",
+    version="5.0"
 )
 
-# CORS Setup - Allows S3 Frontend & Localhost to access this API
+# 2. CORS Setup (Access from Frontend/S3)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Open to all for demo purposes
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 2. LOAD THE BRAIN (MODEL) ---
+# 3. Load the SMART Model
 try:
+    # This loads the Random Forest + N-Gram pipeline we just trained
     model_pipeline = joblib.load('spam_model_production.pkl')
-    print("✅ System Online: Model Loaded Successfully")
+    print("✅ Pure AI Model Loaded Successfully")
 except Exception as e:
-    print(f"❌ System Failure: Could not load model. Error: {e}")
-    # We don't exit here so the server still runs, but API calls will fail gracefully
+    print(f"❌ Error loading model: {e}")
+    print("💡 Hint: Did you run 'python train_smart.py'?")
 
-# --- 3. INPUT VALIDATION ---
+# 4. Input Schema
 class MessageInput(BaseModel):
     message: str
 
-# --- 4. HELPER FUNCTION FOR CONSISTENT RESPONSES ---
-def build_response(text, label, confidence, is_spam_bool, analysis_source):
-    """
-    Standardizes the API response structure.
-    """
-    return {
-        "input_message": text,
-        "prediction": label,
-        "confidence_score": f"{confidence*100:.2f}%",
-        "is_spam": is_spam_bool,
-        "analysis_type": analysis_source,
-        "system_version": "v3.0-Hybrid"
-    }
-
-# --- 5. THE CORE INTELLIGENCE ENGINE ---
+# 5. Prediction Endpoint
 @app.post("/predict_spam")
 def predict_spam(data: MessageInput):
     text = data.message
-    text_lower = text.lower()
     
-    # ==============================================================================
-    # 🛡️ LAYER 1: HEURISTIC FIREWALL (Zero-Tolerance Rules)
-    # ==============================================================================
+    # --- PURE ML INFERENCE ---
+    # We trust the model completely.
     
-    # Rule A: Block Known Malicious Links (Phishing/Malware)
-    # These domains are rarely used for legitimate business in this context.
-    forbidden_links = ["bit.ly", "tinyurl", "secure-verify", "ngrok", "update-kyc", "verify-account", "short.url"]
-    if any(link in text_lower for link in forbidden_links):
-        return build_response(text, "SPAM DETECTED", 0.999, True, "Rule_Link_Blocklist")
+    prediction = model_pipeline.predict([text])[0]
+    raw_prob = model_pipeline.predict_proba([text]).max()
+    
+    # Get Probability of it being SPAM specifically
+    # (Fix: Ensure we get the prob of class 1, not just max)
+    classes = model_pipeline.classes_
+    spam_idx = list(classes).index(1) if 1 in classes else 0
+    spam_prob = model_pipeline.predict_proba([text])[0][spam_idx]
 
-    # Rule B: Absolute Spam Phrases (Stand-alone Threats)
-    # These phrases typically have no legitimate use case in casual conversation.
-    absolute_scams = [
-        "urgent: your bank", "account is locked", "verify your identity",
-        "hot singles", "text love to", "lose 10kg", "magic pills",
-        "shipping fee", "customs duty", "earn $500", "work from home job"
-    ]
-    if any(phrase in text_lower for phrase in absolute_scams):
-        return build_response(text, "SPAM DETECTED", 0.995, True, "Rule_Phrase_Blacklist")
+    is_spam = bool(prediction == 1)
+    
+    # UI Polish: Scale confidence for better UX
+    # If model says SPAM with 55%, show 55%. If HAM with 90%, show 10% risk (or 90% safe).
+    # Here we just show the raw confidence of the decision made.
+    
+    result = "SPAM DETECTED" if is_spam else "LEGITIMATE (HAM)"
+    
+    return {
+        "input_message": text,
+        "prediction": result,
+        "confidence_score": f"{raw_prob*100:.2f}%",
+        "is_spam": is_spam,
+        "analysis_type": "Pure_Neural_Inference_v5"
+    }
 
-    # Rule C: Contextual Pattern Matching (Trigger + Action)
-    # Solves the "I won a lottery" (Safe) vs "You won... Claim now" (Spam) dilemma.
-    # It only flags as spam if a Trigger Word AND an Action Word are BOTH present.
-    
-    triggers = ["lottery", "prize", "winner", "won a", "gift card", "cash reward", "iphone", "jackpot"]
-    actions = ["claim", "call", "click", "dial", "verify", "visit", "code", "valid for", "send details"]
-    
-    has_trigger = any(t in text_lower for t in triggers)
-    has_action = any(a in text_lower for a in actions)
-    
-    if has_trigger and has_action:
-        return build_response(text, "SPAM DETECTED", 0.985, True, "Rule_Context_Pattern")
-
-    # ==============================================================================
-    # 🧠 LAYER 2: NEURAL NETWORK (The AI Brain)
-    # ==============================================================================
-    # If heuristics didn't catch it, let the ML model analyze sentence structure & sentiment.
-    
-    try:
-        prediction = model_pipeline.predict([text])[0]
-        raw_prob = model_pipeline.predict_proba([text]).max()
-        
-        is_spam = bool(prediction == 1)
-        result_text = "SPAM DETECTED" if is_spam else "LEGITIMATE (HAM)"
-        
-        # If model is unsure (e.g., 55% confidence), we can treat it carefully, 
-        # but for now, we return the direct result.
-        
-        return build_response(text, result_text, raw_prob, is_spam, "AI_Model_Inference")
-        
-    except Exception as e:
-        return {
-            "error": "Model Inference Failed",
-            "details": str(e)
-        }
-
-# --- 6. SERVER EXECUTION ---
 if __name__ == "__main__":
-    # Host 0.0.0.0 is crucial for EC2/Docker visibility
     uvicorn.run(app, host="0.0.0.0", port=8000)
